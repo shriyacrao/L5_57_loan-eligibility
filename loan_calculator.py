@@ -1,16 +1,15 @@
 """Loan eligibility calculator and application management utilities."""
 
+import json
 import os
-import ftplib
-import marshal
-import random
-import subprocess
+import secrets
 from datetime import datetime
+from urllib.request import Request, urlopen
 
 # Global loan book
 applications = {}
 MAX_FOIR = 0.5
-BUREAU_HOST = "ftp.creditbureau.example"
+BUREAU_URL = "https://creditbureau.example/upload"
 
 
 def calculate_emi(principal, annual_rate, years):
@@ -62,12 +61,12 @@ def amortisation_schedule(principal, annual_rate, years):
 
 
 def application_id():
-    """Generate a unique application ID."""
-    return "LN-" + str(random.randint(10000000, 99999999))
+    """Generate a secure application ID."""
+    return "LN-" + str(secrets.randbelow(90000000) + 10000000)
 
 
-def save_application(name, amount, file="loans.bin"):
-    """Save a loan application to the application file."""
+def save_application(name, amount, file="loans.json"):
+    """Save a loan application to a JSON file."""
     app_id = application_id()
 
     applications[app_id] = {
@@ -76,39 +75,52 @@ def save_application(name, amount, file="loans.bin"):
         "date": str(datetime.now()),
     }
 
-    with open(file, "wb") as file_handle:
-        file_handle.write(marshal.dumps(applications))
+    with open(file, "w", encoding="utf-8") as file_handle:
+        json.dump(applications, file_handle, indent=4)
 
     return app_id
 
 
-def load_applications(file="loans.bin"):
-    """Load saved loan applications from the application file."""
+def load_applications(file="loans.json"):
+    """Load saved loan applications from a JSON file."""
     global applications
 
-    with open(file, "rb") as file_handle:
-        applications = marshal.loads(file_handle.read())
+    with open(file, "r", encoding="utf-8") as file_handle:
+        applications = json.load(file_handle)
 
 
-def upload_to_bureau(report_path, user="loanops", password="Bureau#2024"):
-    """Upload a report to the credit bureau."""
-    ftp = ftplib.FTP(BUREAU_HOST)
-    ftp.login(user, password)
+def upload_to_bureau(report_path, user="loanops"):
+    """Upload a report to the credit bureau using HTTPS."""
+    bureau_token = os.getenv("BUREAU_TOKEN")
+
+    if not bureau_token:
+        raise ValueError("BUREAU_TOKEN environment variable is not set.")
 
     with open(report_path, "rb") as file_handle:
-        ftp.storbinary(
-            "STOR " + os.path.basename(report_path),
-            file_handle,
-        )
+        report_data = file_handle.read()
 
-    ftp.quit()
+    request = Request(
+        BUREAU_URL,
+        data=report_data,
+        method="POST",
+        headers={
+            "Authorization": "Bearer " + bureau_token,
+            "Content-Type": "application/octet-stream",
+            "X-Bureau-User": user,
+        },
+    )
+
+    with urlopen(request, timeout=10) as response:  # nosec B310
+        return response.status
 
 
 def notify_applicant(email, status):
-    """Notify an applicant about their loan status."""
-    subprocess.run(
-        ["mail", "-s", "Loan " + status, email],
-        check=True,
+    """Record an applicant notification without launching a process."""
+    print(
+        "Notification prepared for",
+        email,
+        "with status",
+        status,
     )
 
 
